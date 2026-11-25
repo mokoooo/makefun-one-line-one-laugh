@@ -1,61 +1,62 @@
 #!/usr/bin/env python3
-"""Write the One Line, One Laugh entry to entry.txt.
+"""Publish this entry's single joke as entry.txt.
 
-The single joke lives in LINE below. The program validates it,
-then writes it (plus one trailing newline) atomically into the
-output directory named by MAKEFUN_OUTPUT_DIR (default /output).
+Running the module drops one line of text into the folder the
+harness points MAKEFUN_OUTPUT_DIR at (falling back to /output),
+which is the whole submission for One Line, One Laugh.
 """
 
 import os
 import sys
-import tempfile
+from pathlib import Path
 
-LINE = "After my third wrong turn, my GPS said 'recalculating' with such patience that I could hear a machine learning to lower its expectations."
-
-
-def validate(line):
-    """Return an error message, or None when the line is acceptable."""
-    if not isinstance(line, str):
-        return "line must be text"
-    if len(line) < 1 or len(line) > 200:
-        return "line must be between 1 and 200 characters"
-    if not line.strip():
-        return "line must not be blank"
-    if "\n" in line or "\r" in line:
-        return "line must be a single line with no newline characters"
-    return None
+JOKE = "After my third wrong turn, my GPS said 'recalculating' with such patience that I could hear a machine learning to lower its expectations."
+MAX_CHARS = 200
 
 
-def main():
-    problem = validate(LINE)
-    if problem is not None:
-        print("error: " + problem, file=sys.stderr)
+def joke_problems(text):
+    """Collect every reason this text cannot be entered."""
+    problems = []
+    if not isinstance(text, str):
+        problems.append("the joke is not text")
+        return problems
+    if len(text) == 0 or len(text) > MAX_CHARS:
+        problems.append("the joke must be 1 to 200 characters long")
+    if text.strip() == "":
+        problems.append("the joke must not be blank")
+    if any(mark in text for mark in ("\n", "\r")):
+        problems.append("the joke must fit on one line")
+    return problems
+
+
+def target_folder():
+    """Resolve where entry.txt belongs, ignoring stray spaces."""
+    raw = os.environ.get("MAKEFUN_OUTPUT_DIR", "")
+    cleaned = raw.strip()
+    return Path(cleaned) if cleaned else Path("/output")
+
+
+def publish():
+    problems = joke_problems(JOKE)
+    if problems:
+        for problem in problems:
+            print("cannot publish: " + problem, file=sys.stderr)
         return 1
-
-    out_dir = (os.environ.get("MAKEFUN_OUTPUT_DIR") or "").strip() or "/output"
-    os.makedirs(out_dir, exist_ok=True)
-
-    payload = (LINE + "\n").encode("utf-8")
-    target = os.path.join(out_dir, "entry.txt")
-
-    fd, tmp_path = tempfile.mkstemp(prefix=".entry-", dir=out_dir)
+    folder = target_folder()
+    folder.mkdir(parents=True, exist_ok=True)
+    staging = folder / ".entry.txt.part"
     try:
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.chmod(tmp_path, 0o644)
-        os.replace(tmp_path, target)
+        staging.write_bytes((JOKE + "\n").encode("utf-8"))
+        staging.chmod(0o644)
+        staging.replace(folder / "entry.txt")
     except BaseException:
         try:
-            os.unlink(tmp_path)
+            staging.unlink(missing_ok=True)
         except OSError:
             pass
         raise
-
-    os.chmod(target, 0o644)
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(publish())
